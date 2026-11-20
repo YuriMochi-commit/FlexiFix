@@ -1,0 +1,44 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    // An admin is anyone with a document in the "admins" collection whose ID is their login UID.
+    // Those documents are created by hand in the Firebase Console, never from the app.
+    function isAdmin() {
+      return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    function isMember() {
+      return signedIn() && exists(/databases/$(database)/documents/members/$(request.auth.uid));
+    }
+
+    match /admins/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    match /members/{uid} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow create, delete: if isAdmin();
+      // A member may change only their own body data, check-ins, fasting and renewal request.
+      // Tier, start date, months, notes and phone can only be changed by an admin.
+      allow update: if isAdmin() || (
+        signedIn() && request.auth.uid == uid &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['weight', 'height', 'targetWeight', 'goal', 'goalsM', 'wlog', 'att', 'fast', 'renewReq'])
+      );
+    }
+
+    match /announcements/{id} {
+      allow read: if isAdmin() || isMember();
+      allow write: if isAdmin();
+    }
+
+    match /settings/{id} {
+      allow read: if isAdmin() || isMember();
+      allow write: if isAdmin();
+    }
+  }
+}
